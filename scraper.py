@@ -14,18 +14,12 @@ import tiktoken
 
 from dotenv import load_dotenv
 from selenium import webdriver
-#from selenium.webdriver.firefox.service import Service
-#from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-#from webdriver_manager.firefox import GeckoDriverManager
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.os_manager import ChromeType
-
 
 
 from openai import OpenAI
@@ -33,7 +27,7 @@ import google.generativeai as genai
 from groq import Groq
 
 
-from assets import USER_AGENTS,METHOD,PRICING,HEADLESS_OPTIONS,SYSTEM_MESSAGE,USER_MESSAGE,LLAMA_MODEL_FULLNAME,GROQ_LLAMA_MODEL_FULLNAME
+from assets import USER_AGENTS,PRICING,HEADLESS_OPTIONS,SYSTEM_MESSAGE,USER_MESSAGE,LLAMA_MODEL_FULLNAME,GROQ_LLAMA_MODEL_FULLNAME
 load_dotenv()
 
 # Set up the Chrome WebDriver options
@@ -46,20 +40,14 @@ def setup_selenium():
     options.add_argument(f"user-agent={user_agent}")
 
     # Add other options
-    #for option in HEADLESS_OPTIONS:
-    #    options.add_argument(option)
-    options.add_argument("--disable-gpu")
-    options.add_argument("--headless")
-    options.add_argument('--disable-dev-shm-usage')
+    for option in HEADLESS_OPTIONS:
+        options.add_argument(option)
 
     # Specify the path to the ChromeDriver
-    service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
-    #service = Service("/usr/local/bin/geckodriver") #Service(GeckoDriverManager().install())
-    # Initialize the WebDriver
-    #driver = webdriver.Firefox(service=service, options=options)
-    driver = webdriver.Chrome(service=service, options=options)
+    service = Service(r"./chromedriver-win64/chromedriver.exe")  
 
-    
+    # Initialize the WebDriver
+    driver = webdriver.Chrome(service=service, options=options)
     return driver
 
 def click_accept_cookies(driver):
@@ -74,9 +62,7 @@ def click_accept_cookies(driver):
         
         # Common text variations for cookie buttons
         accept_text_variations = [
-            "accept", "agree", "allow", "consent", "continue", "ok", "I agree", "got it", 
-            "Aceitar", "Aceitar e fechar", "Aceitar e fechar: Aceitar o nosso processamento de dados e fechar",
-            "didomi-notice-agree-button", "\nAceitar\n", "Fechar", "fechar"
+            "accept", "agree", "allow", "consent", "continue", "ok", "I agree", "got it"
         ]
         
         # Iterate through different element types and common text variations
@@ -96,72 +82,31 @@ def click_accept_cookies(driver):
     
     except Exception as e:
         print(f"Error finding 'Accept Cookies' button: {e}")
-def click_close(driver):
-    try:
-        # Wait until the element is clickable
-        fechar_button = WebDriverWait(driver, 20).until(
-            EC.element_to_be_clickable((By.XPATH, '//*[@id="mount_0_0_km"]/div/div[1]/div/div[5]/div/div/div[1]/div/div[2]/div/div/div/div[1]/div'))
-        )
-        
-        # Scroll to the element (if necessary)
-        actions = ActionChains(driver)
-        actions.move_to_element(fechar_button).perform()
-    
-        # Click the 'Fechar' button
-        fechar_button.click()
-    
-        print("Clicked the 'Fechar' button successfully.")
-    
-    except Exception as e:
-        print(f"Error clicking the 'Fechar' button: {e}")
 
-def fetch_html_selenium(url, scroll_pause_time=2, max_scrolls=10):
+def fetch_html_selenium(url):
     driver = setup_selenium()
     try:
         driver.get(url)
-        print("Step 1")
-        driver.maximize_window()
+        
         # Add random delays to mimic human behavior
-        time.sleep(5)  # Adjust this to simulate time for user to read or interact
-
-        print("sleep(5)")
+        time.sleep(1)  # Adjust this to simulate time for user to read or interact
+        driver.maximize_window()
+        
 
         # Try to find and click the 'Accept Cookies' button
-        click_accept_cookies(driver)
-        print("click_accept_cookies")
+        # click_accept_cookies(driver)
 
-        click_close(driver)
-        print("click_close")
-
-        
-        last_height = driver.execute_script("return document.body.scrollHeight")
-        scroll_count = 0
-        print("last_height: ", last_height, "scroll_count < max_scrolls", scroll_count, max_scrolls)
-
-
-        while scroll_count < max_scrolls:
-            # Scroll down to the bottom
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-
-            # Wait for new content to load (adjust as necessary)
-            time.sleep(scroll_pause_time)
-
-            # Check if we have reached the end of the page
-            new_height = driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height:
-                print("Reached the end of the page.")
-                break
-            last_height = new_height
-            scroll_count += 1
-            print(f"Scrolled {scroll_count} times")
-
-        # Get the page source after scrolling
+        # Add more realistic actions like scrolling
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+        time.sleep(random.uniform(1.1, 1.8))  # Simulate time taken to scroll and read
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight/1.2);")
+        time.sleep(random.uniform(1.1, 1.8))
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight/1);")
+        time.sleep(random.uniform(1.1, 2.1))
         html = driver.page_source
         return html
-
     finally:
         driver.quit()
-
 
 def clean_html(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
@@ -187,12 +132,10 @@ def html_to_markdown_with_readability(html_content):
 
 
     
-def save_raw_data(raw_data, timestamp, output_folder='output'):
-    # Ensure the output folder exists
+def save_raw_data(raw_data: str, output_folder: str, file_name: str):
+    """Save raw markdown data to the specified output folder."""
     os.makedirs(output_folder, exist_ok=True)
-    
-    # Save the raw markdown data with timestamp in filename
-    raw_output_path = os.path.join(output_folder, f'rawData_{timestamp}.md')
+    raw_output_path = os.path.join(output_folder, file_name)
     with open(raw_output_path, 'w', encoding='utf-8') as f:
         f.write(raw_data)
     print(f"Raw data saved to {raw_output_path}")
@@ -380,12 +323,10 @@ def format_data(data, DynamicListingsContainer, DynamicListingModel, selected_mo
 
         # Extract the content from the response
         response_content = completion.choices[0].message.content
-        #print(" resposta :", response_content)
-        print(f"Response content length: {len(response_content)}")
+        
         # Convert the content from JSON string to a Python dictionary
-        parsed_response = response_content.replace('\n', '\\n')  # Example: replace newlines
         parsed_response = json.loads(response_content)
-        print("parsed_response")
+        
         # completion.usage
         token_counts = {
             "input_tokens": completion.usage.prompt_tokens,
@@ -398,8 +339,8 @@ def format_data(data, DynamicListingsContainer, DynamicListingModel, selected_mo
 
 
 
-def save_formatted_data(formatted_data, timestamp, output_folder='output'):
-    # Ensure the output folder exists
+def save_formatted_data(formatted_data, output_folder: str, json_file_name: str, excel_file_name: str):
+    """Save formatted data as JSON and Excel in the specified output folder."""
     os.makedirs(output_folder, exist_ok=True)
     
     # Parse the formatted data if it's a JSON string (from Gemini API)
@@ -412,8 +353,8 @@ def save_formatted_data(formatted_data, timestamp, output_folder='output'):
         # Handle data from OpenAI or other sources
         formatted_data_dict = formatted_data.dict() if hasattr(formatted_data, 'dict') else formatted_data
 
-    # Save the formatted data as JSON with timestamp in filename
-    json_output_path = os.path.join(output_folder, f'sorted_data_{timestamp}.json')
+    # Save the formatted data as JSON
+    json_output_path = os.path.join(output_folder, json_file_name)
     with open(json_output_path, 'w', encoding='utf-8') as f:
         json.dump(formatted_data_dict, f, indent=4)
     print(f"Formatted data saved to JSON at {json_output_path}")
@@ -433,7 +374,7 @@ def save_formatted_data(formatted_data, timestamp, output_folder='output'):
         print("DataFrame created successfully.")
 
         # Save the DataFrame to an Excel file
-        excel_output_path = os.path.join(output_folder, f'sorted_data_{timestamp}.xlsx')
+        excel_output_path = os.path.join(output_folder, excel_file_name)
         df.to_excel(excel_output_path, index=False)
         print(f"Formatted data saved to Excel at {excel_output_path}")
         
@@ -454,24 +395,41 @@ def calculate_price(token_counts, model):
     return input_token_count, output_token_count, total_cost
 
 
+def generate_unique_folder_name(url):
+    timestamp = datetime.now().strftime('%Y_%m_%d__%H_%M_%S')
+    url_name = re.sub(r'\W+', '_', url.split('//')[1].split('/')[0])  # Extract domain name and replace non-alphanumeric characters
+    return f"{url_name}_{timestamp}"
 
 
-
-if __name__ == "__main__":
-    url = 'https://webscraper.io/test-sites/e-commerce/static'
-    fields=['Name of item', 'Price']
-
-    try:
-        # # Generate timestamp
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        
-        # Scrape data
-        raw_html = fetch_html_selenium(url)
+def scrape_multiple_urls(urls, fields, selected_model):
+    output_folder = os.path.join('output', generate_unique_folder_name(urls[0]))
+    os.makedirs(output_folder, exist_ok=True)
     
-        markdown = html_to_markdown_with_readability(raw_html)
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_cost = 0
+    all_data = []
+    markdown = None  # We'll store the markdown for the first (or only) URL
+    
+    for i, url in enumerate(urls, start=1):
+        raw_html = fetch_html_selenium(url)
+        current_markdown = html_to_markdown_with_readability(raw_html)
+        if i == 1:
+            markdown = current_markdown  # Store markdown for the first URL
         
+        input_tokens, output_tokens, cost, formatted_data = scrape_url(url, fields, selected_model, output_folder, i, current_markdown)
+        total_input_tokens += input_tokens
+        total_output_tokens += output_tokens
+        total_cost += cost
+        all_data.append(formatted_data)
+    
+    return output_folder, total_input_tokens, total_output_tokens, total_cost, all_data, markdown
+
+def scrape_url(url: str, fields: List[str], selected_model: str, output_folder: str, file_number: int, markdown: str):
+    """Scrape a single URL and save the results."""
+    try:
         # Save raw data
-        save_raw_data(markdown, timestamp)
+        save_raw_data(markdown, output_folder, f'rawData_{file_number}.md')
 
         # Create the dynamic listing model
         DynamicListingModel = create_dynamic_listing_model(fields)
@@ -480,21 +438,18 @@ if __name__ == "__main__":
         DynamicListingsContainer = create_listings_container_model(DynamicListingModel)
         
         # Format data
-        formatted_data, token_counts = format_data(markdown, DynamicListingsContainer,DynamicListingModel,"Groq Llama3.1 70b")  # Use markdown, not raw_html
-        print(formatted_data)
+        formatted_data, token_counts = format_data(markdown, DynamicListingsContainer, DynamicListingModel, selected_model)
+        
         # Save formatted data
-        save_formatted_data(formatted_data, timestamp)
+        save_formatted_data(formatted_data, output_folder, f'sorted_data_{file_number}.json', f'sorted_data_{file_number}.xlsx')
 
-        # Convert formatted_data back to text for token counting
-        formatted_data_text = json.dumps(formatted_data.dict() if hasattr(formatted_data, 'dict') else formatted_data) 
-        
-        
-        # Automatically calculate the token usage and cost for all input and output
-        input_tokens, output_tokens, total_cost = calculate_price(token_counts, "Groq Llama3.1 70b")
-        print(f"Input token count: {input_tokens}")
-        print(f"Output token count: {output_tokens}")
-        print(f"Estimated total cost: ${total_cost:.4f}")
+        # Calculate and return token usage and cost
+        input_tokens, output_tokens, total_cost = calculate_price(token_counts, selected_model)
+        return input_tokens, output_tokens, total_cost, formatted_data
 
     except Exception as e:
-        print(f"An error occurred: {e}")
-        
+        print(f"An error occurred while processing {url}: {e}")
+        return 0, 0, 0, None
+
+
+   

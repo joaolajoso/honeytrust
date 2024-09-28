@@ -1,204 +1,314 @@
+
 import streamlit as st
 from streamlit_tags import st_tags_sidebar
 import pandas as pd
-from pandas import json_normalize
 import json
-import requests
 from datetime import datetime
-from scraper import (fetch_html_selenium, save_raw_data, format_data,
-                     save_formatted_data, calculate_price, html_to_markdown_with_readability,
-                     create_dynamic_listing_model, create_listings_container_model)
-
-from assets import PRICING, METHOD
+from scraper import fetch_html_selenium, save_raw_data, format_data, save_formatted_data, calculate_price, html_to_markdown_with_readability, create_dynamic_listing_model, create_listings_container_model, scrape_url
+from pagination_detector import detect_pagination_elements, PaginationData
 import re
+from urllib.parse import urlparse
+from assets import PRICING
+import os
+from pydantic import BaseModel
 
 
-
+def serialize_pydantic(obj):
+    if isinstance(obj, BaseModel):
+        return obj.dict()
+    raise TypeError(f'Object of type {obj.__class__.__name__} is not JSON serializable')
 
 # Initialize Streamlit app
-st.set_page_config(page_title="Universal Web Scraper")
+st.set_page_config(page_title="Universal Web Scraper", page_icon="🦑")
 st.title("Universal Web Scraper 🦑")
 
-# Sidebar components
-st.sidebar.title("Web Scraper Settings")
-method_selection = st.sidebar.selectbox("Select Method Scrapper LINK/POST/CHAT", options=list(METHOD.keys()), index=0)
-model_selection = st.sidebar.selectbox("Select Model", options=list(PRICING.keys()), index=0)
-url_input = st.sidebar.text_input("Enter URL")
-
-# Tags input specifically in the sidebar
-tags = st.sidebar.empty()  # Create an empty placeholder in the sidebar
-tags = st_tags_sidebar(
-    label='Enter Fields to Extract:',
-    text='Press enter to add a tag',
-    value=[],  # Default values if any
-    suggestions=[],  # You can still offer suggestions, or keep it empty for complete freedom
-    maxtags=-1,  # Set to -1 for unlimited tags
-    key='tags_input'
-)
-# Sidebar input for payload and headers when POST is selected
-if method_selection == 'POST':
-    payload_input = st.sidebar.text_area("Enter payload (JSON format)")
-    headers_input = st.sidebar.text_area("Enter headers (JSON format)")
-
-    # Convert payload and headers from string to dictionary
-    try:
-        payload = json.loads(payload_input) if payload_input else {}
-    except json.JSONDecodeError:
-        st.error("Invalid JSON in payload input")
-        payload = {}
-
-    try:
-        headers = json.loads(headers_input) if headers_input else {}
-    except json.JSONDecodeError:
-        st.error("Invalid JSON in headers input")
-        headers = {}
-    
-
-st.sidebar.markdown("---")
-
-# Process tags into a list
-fields = tags
-
-# Initialize variables to store token and cost information
-input_tokens = output_tokens = total_cost = 0  # Default values
-
-def json_to_markdown_table(json_data):
-    if not json_data:
-        return "No data available"
-
-    if isinstance(json_data, dict):
-        # Handle if json_data is a dictionary (e.g., nested structure)
-        json_data = [json_data]
-
-    # Assuming json_data is a list of dictionaries
-    columns = json_data[0].keys()
-
-    header = "| " + " | ".join(columns) + " |"
-    separator = "| " + " | ".join(["---"] * len(columns)) + " |"
-    rows = []
-    for item in json_data:
-        row = "| " + " | ".join(str(item.get(col, "")) for col in columns) + " |"
-        rows.append(row)
-
-    return "\n".join([header, separator] + rows)
-
-# Buttons to trigger scraping
-def perform_scrape():
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-
-    if method_selection == 'LINK':
-        try:
-            raw_html = fetch_html_selenium(url_input)
-            st.markdown(raw_html, unsafe_allow_html=True)
-            markdown = html_to_markdown_with_readability(raw_html)
-            save_raw_data(markdown, timestamp)
-
-          
-        except Exception as e:
-            st.error(f"An error occurred: {e}")
-            return None, None, None, 0, 0, 0, ""
-
-    elif method_selection == 'POST':
-        response = requests.post(url_input, json=payload, headers=headers, stream=True)
-        #st.write(response.text)  # Print the full raw response for debugging
-        #st.write(f"Content-Type: {response.headers.get('Content-Type')}")
-
-        if response.status_code == 200:
-            # Check if the response has valid JSON content
-            if response.content:
-                try:
-                    #response_content = response.content.decode('utf-8')
-                    # Accumulate response content from chunks
-                    response_content = ""
-                    for chunk in response.iter_content(chunk_size=1024):  # Adjust chunk size if needed
-                        response_content += chunk.decode('utf-8')
-                    # Remove trailing commas before closing braces
-                    cleaned_response = re.sub(r',\s*([}\]])', r'\1', response_content)
- 
-                    
-                    try:
-                        data = response.json().get('items', [])
-                        #data = json.loads(cleaned_response)
-                        #st.write("Cleaned JSON is valid")
-                    except json.JSONDecodeError as e:
-                        st.error(f"Still unable to decode JSON: {e}")
-                      
-                    # Save response to a file for further inspection
-                    st.download_button("Download JSON source", data=data, file_name=f"{timestamp}_data.json")
-
-
-                    df = json_normalize(data)
-                    #df = pd.DataFrame(data)
-                    st.write("Scraped Data:", df)
-                    st.write(f"Total response length: {len(response_content)}")
-                    #print(response_content[:1000])  # Log the first 1000 characters for debugging
-                    #print("Ok json!")
-                    #data = json.loads(response_content)
-                    #st.write("Scraped Data Source:", data)
-                    markdown = json_to_markdown_table(data)
-                    save_raw_data(markdown, timestamp)
-                except json.JSONDecodeError:
-                    st.error("Invalid JSON response. Check the API or payload.")
-                    return None, None, None, 0, 0, 0, ""
-            else:
-                st.error("Empty response received.")
-                return None, None, None, 0, 0, 0, ""
-        else:
-            st.error(f"Error: {response.status_code}")
-            return None, None, None, 0, 0, 0, ""
-
-    else:
-            markdown = f"Grab all data from {url_input}"
-          
-          
-    DynamicListingModel = create_dynamic_listing_model(fields)
-    DynamicListingsContainer = create_listings_container_model(DynamicListingModel)
-    formatted_data, tokens_count = format_data(markdown, DynamicListingsContainer, DynamicListingModel, model_selection)
-    input_tokens, output_tokens, total_cost = calculate_price(tokens_count, model=model_selection)
-    df = save_formatted_data(formatted_data, timestamp)
-    
-    return df, formatted_data, markdown, input_tokens, output_tokens, total_cost, timestamp
-
+# Initialize session state variables if they don't exist
+if 'results' not in st.session_state:
+    st.session_state['results'] = None
 if 'perform_scrape' not in st.session_state:
     st.session_state['perform_scrape'] = False
 
+# Sidebar components
+st.sidebar.title("Web Scraper Settings")
+model_selection = st.sidebar.selectbox("Select Model", options=list(PRICING.keys()), index=0)
+url_input = st.sidebar.text_input("Enter URL(s) separated by whitespace")
+
+# Add toggle to show/hide tags field
+show_tags = st.sidebar.toggle("Enable Scraping")
+
+# Conditionally show tags input based on the toggle
+tags = []
+if show_tags:
+    tags = st_tags_sidebar(
+        label='Enter Fields to Extract:', 
+        text='Press enter to add a tag',
+        value=[],
+        suggestions=[],
+        maxtags=-1,
+        key='tags_input'
+    )
+
+st.sidebar.markdown("---")
+# Add pagination toggle and input
+use_pagination = st.sidebar.toggle("Enable Pagination")
+pagination_details = None
+if use_pagination:
+    pagination_details = st.sidebar.text_input("Enter Pagination Details (optional)", 
+        help="Describe how to navigate through pages (e.g., 'Next' button class, URL pattern)")
+
+st.sidebar.markdown("---")
+
+
+def generate_unique_folder_name(url):
+    timestamp = datetime.now().strftime('%Y_%m_%d__%H_%M_%S')
+    
+    # Parse the URL
+    parsed_url = urlparse(url)
+    
+    # Extract the domain name
+    domain = parsed_url.netloc or parsed_url.path.split('/')[0]
+    
+    # Remove 'www.' if present
+    domain = re.sub(r'^www\.', '', domain)
+    
+    # Remove any non-alphanumeric characters and replace with underscores
+    clean_domain = re.sub(r'\W+', '_', domain)
+    
+    return f"{clean_domain}_{timestamp}"
+
+def scrape_multiple_urls(urls, fields, selected_model):
+    output_folder = os.path.join('output', generate_unique_folder_name(urls[0]))
+    os.makedirs(output_folder, exist_ok=True)
+    
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_cost = 0
+    all_data = []
+    first_url_markdown = None
+    
+    for i, url in enumerate(urls, start=1):
+        raw_html = fetch_html_selenium(url)
+        markdown = html_to_markdown_with_readability(raw_html)
+        if i == 1:
+            first_url_markdown = markdown
+        
+        input_tokens, output_tokens, cost, formatted_data = scrape_url(url, fields, selected_model, output_folder, i, markdown)
+        total_input_tokens += input_tokens
+        total_output_tokens += output_tokens
+        total_cost += cost
+        all_data.append(formatted_data)
+    
+    return output_folder, total_input_tokens, total_output_tokens, total_cost, all_data, first_url_markdown
+
+# Define the scraping function
+def perform_scrape():
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    raw_html = fetch_html_selenium(url_input)
+    markdown = html_to_markdown_with_readability(raw_html)
+    save_raw_data(markdown, timestamp)
+    
+    # Detect pagination if enabled
+    pagination_info = None
+    if use_pagination:
+        pagination_data, token_counts, pagination_price = detect_pagination_elements(
+            url_input, pagination_details, model_selection, markdown
+        )
+        pagination_info = {
+            "page_urls": pagination_data.page_urls,
+            "token_counts": token_counts,
+            "price": pagination_price
+        }
+    
+    # Initialize token and cost variables with default values
+    input_tokens = 0
+    output_tokens = 0
+    total_cost = 0
+    
+    if show_tags:
+        DynamicListingModel = create_dynamic_listing_model(tags)
+        DynamicListingsContainer = create_listings_container_model(DynamicListingModel)
+        formatted_data, tokens_count = format_data(
+            markdown, DynamicListingsContainer, DynamicListingModel, model_selection
+        )
+        input_tokens, output_tokens, total_cost = calculate_price(tokens_count, model=model_selection)
+        df = save_formatted_data(formatted_data, timestamp)
+    else:
+        formatted_data = None
+        df = None
+
+    return df, formatted_data, markdown, input_tokens, output_tokens, total_cost, timestamp, pagination_info
+
 if st.sidebar.button("Scrape"):
     with st.spinner('Please wait... Data is being scraped.'):
-        st.session_state['results'] = perform_scrape()
+        urls = url_input.split()
+        field_list = tags
+        output_folder, total_input_tokens, total_output_tokens, total_cost, all_data, first_url_markdown = scrape_multiple_urls(urls, field_list, model_selection)
+        
+        # Perform pagination if enabled and only one URL is provided
+        pagination_info = None
+        if use_pagination and len(urls) == 1:
+            try:
+                pagination_result = detect_pagination_elements(
+                    urls[0], pagination_details, model_selection, first_url_markdown
+                )
+                
+                if pagination_result is not None:
+                    pagination_data, token_counts, pagination_price = pagination_result
+                    
+                    # Handle both PaginationData objects and dictionaries
+                    if isinstance(pagination_data, PaginationData):
+                        page_urls = pagination_data.page_urls
+                    elif isinstance(pagination_data, dict):
+                        page_urls = pagination_data.get("page_urls", [])
+                    else:
+                        page_urls = []
+                    
+                    pagination_info = {
+                        "page_urls": page_urls,
+                        "token_counts": token_counts,
+                        "price": pagination_price
+                    }
+                else:
+                    st.warning("Pagination detection returned None. No pagination information available.")
+            except Exception as e:
+                st.error(f"An error occurred during pagination detection: {e}")
+                pagination_info = {
+                    "page_urls": [],
+                    "token_counts": {"input_tokens": 0, "output_tokens": 0},
+                    "price": 0.0
+                }
+        
+        st.session_state['results'] = (all_data, None, first_url_markdown, total_input_tokens, total_output_tokens, total_cost, output_folder, pagination_info)
         st.session_state['perform_scrape'] = True
 
+# Display results if they exist in session state
+if st.session_state['results']:
+    all_data, _, _, input_tokens, output_tokens, total_cost, output_folder, pagination_info = st.session_state['results']
+    
+    # Display scraping details in sidebar only if scraping was performed and the toggle is on
+    if all_data and show_tags:
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### Scraping Details")
+        st.sidebar.markdown("#### Token Usage")
+        st.sidebar.markdown(f"*Input Tokens:* {input_tokens}")
+        st.sidebar.markdown(f"*Output Tokens:* {output_tokens}")
+        st.sidebar.markdown(f"**Total Cost:** :green-background[**${total_cost:.4f}**]")
 
+        # Display scraped data in main area
+        st.subheader("Scraped/Parsed Data")
+        for i, data in enumerate(all_data, start=1):
+            st.write(f"Data from URL {i}:")
+            
+            # Handle string data (convert to dict if it's JSON)
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except json.JSONDecodeError:
+                    st.error(f"Failed to parse data as JSON for URL {i}")
+                    continue
+            
+            if isinstance(data, dict):
+                if 'listings' in data and isinstance(data['listings'], list):
+                    df = pd.DataFrame(data['listings'])
+                else:
+                    # If 'listings' is not in the dict or not a list, use the entire dict
+                    df = pd.DataFrame([data])
+            elif hasattr(data, 'listings') and isinstance(data.listings, list):
+                # Handle the case where data is a Pydantic model
+                listings = [item.dict() for item in data.listings]
+                df = pd.DataFrame(listings)
+            else:
+                st.error(f"Unexpected data format for URL {i}")
+                continue
+            
+            # Display the dataframe
+            st.dataframe(df, use_container_width=True)
 
-if st.session_state.get('perform_scrape'):
-    if 'results' not in st.session_state:
-        st.session_state['results'] = None
-    else:
-        df, formatted_data, markdown, input_tokens, output_tokens, total_cost, timestamp = st.session_state['results']
+        # Download options
+        st.subheader("Download Options")
+        col1, col2 = st.columns(2)
+        with col1:
+            json_data = json.dumps(all_data, default=lambda o: o.dict() if hasattr(o, 'dict') else str(o), indent=4)
+            st.download_button(
+                "Download JSON",
+                data=json_data,
+                file_name="scraped_data.json"
+            )
+        with col2:
+            # Convert all data to a single DataFrame
+            all_listings = []
+            for data in all_data:
+                if isinstance(data, str):
+                    try:
+                        data = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                if isinstance(data, dict) and 'listings' in data:
+                    all_listings.extend(data['listings'])
+                elif hasattr(data, 'listings'):
+                    all_listings.extend([item.dict() for item in data.listings])
+                else:
+                    all_listings.append(data)
+            
+            combined_df = pd.DataFrame(all_listings)
+            st.download_button(
+                "Download CSV",
+                data=combined_df.to_csv(index=False),
+                file_name="scraped_data.csv"
+            )
 
-        # Display the DataFrame and other data
-        st.write("Scraped Data:", df)
-        st.sidebar.markdown("## Token Usage")
-        st.sidebar.markdown(f"**Input Tokens:** {input_tokens}")
-        st.sidebar.markdown(f"**Output Tokens:** {output_tokens}")
-        st.sidebar.markdown(f"**Total Cost:** :green-background[***${total_cost:.4f}***]")
+        st.success(f"Scraping completed. Results saved in {output_folder}")
+
+    # Add pagination details to sidebar
+    if pagination_info and use_pagination:
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### Pagination Details")
+        st.sidebar.markdown(f"**Number of Page URLs:** {len(pagination_info['page_urls'])}")
+        st.sidebar.markdown("#### Pagination Token Usage")
+        st.sidebar.markdown(f"*Input Tokens:* {pagination_info['token_counts']['input_tokens']}")
+        st.sidebar.markdown(f"*Output Tokens:* {pagination_info['token_counts']['output_tokens']}")
+        st.sidebar.markdown(f"**Pagination Cost:** :red-background[**${pagination_info['price']:.4f}**]")
+
+        st.markdown("---")
+        st.subheader("Pagination Information")
+        pagination_df = pd.DataFrame(pagination_info["page_urls"], columns=["Page URLs"])
+        
+        st.dataframe(
+            pagination_df,
+            column_config={
+                "Page URLs": st.column_config.LinkColumn("Page URLs")
+            },use_container_width=True
+        )
 
         # Create columns for download buttons
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
-            st.download_button("Download JSON", data=json.dumps(formatted_data, indent=4), file_name=f"{timestamp}_data.json")
+            st.download_button(
+                "Download Pagination JSON", 
+                data=json.dumps(pagination_info["page_urls"], indent=4), 
+                file_name=f"pagination_urls.json"
+            )
         with col2:
-            if isinstance(formatted_data, str):
-                data_dict = json.loads(formatted_data)
-            else:
-                data_dict = formatted_data
+            st.download_button(
+                "Download Pagination CSV", 
+                data=pagination_df.to_csv(index=False), 
+                file_name=f"pagination_urls.csv"
+            )
 
-            first_key = next(iter(data_dict))
-            main_data = data_dict[first_key]
-            df = pd.DataFrame(main_data)
-            st.download_button("Download CSV", data=df.to_csv(index=False), file_name=f"{timestamp}_data.csv")
-        with col3:
-            st.download_button("Download Markdown", data=markdown, file_name=f"{timestamp}_data.md")
+    # Display combined totals only if both scraping and pagination were performed and both toggles are on
+    if all_data and pagination_info and show_tags and use_pagination:
+        st.markdown("---")
+        total_input_tokens = input_tokens + pagination_info['token_counts']['input_tokens']
+        total_output_tokens = output_tokens + pagination_info['token_counts']['output_tokens']
+        total_combined_cost = total_cost + pagination_info['price']
+        st.markdown("### Total Counts and Cost (Including Pagination)")
+        st.markdown(f"**Total Input Tokens:** {total_input_tokens}")
+        st.markdown(f"**Total Output Tokens:** {total_output_tokens}")
+        st.markdown(f"**Total Combined Cost:** :green[**${total_combined_cost:.4f}**]")
 
-# Ensure that these UI components are persistent and don't rely on re-running the scrape function
-if 'results' in st.session_state:
-    df, formatted_data, markdown, input_tokens, output_tokens, total_cost, timestamp = st.session_state['results']
+# Add a clear results button
+if st.sidebar.button("Clear Results"):
+    st.session_state['results'] = None
+    st.session_state['perform_scrape'] = False
+    st.rerun()
+         

@@ -20,6 +20,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.os_manager import ChromeType
 
 
 from openai import OpenAI
@@ -39,14 +41,16 @@ def setup_selenium():
     user_agent = random.choice(USER_AGENTS)
     options.add_argument(f"user-agent={user_agent}")
 
-    # Add other options
-    for option in HEADLESS_OPTIONS:
-        options.add_argument(option)
+    #    options.add_argument(option)
+    options.add_argument("--disable-gpu")
+    options.add_argument("--headless")
+    options.add_argument('--disable-dev-shm-usage')
 
     # Specify the path to the ChromeDriver
-    service = Service(r"./chromedriver-win64/chromedriver.exe")  
-
+    service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
+    #service = Service("/usr/local/bin/geckodriver") #Service(GeckoDriverManager().install())
     # Initialize the WebDriver
+    #driver = webdriver.Firefox(service=service, options=options)
     driver = webdriver.Chrome(service=service, options=options)
     return driver
 

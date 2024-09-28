@@ -64,6 +64,7 @@ USER_AGENTS  = [
 
 # Define the pricing for models without Batch API
 PRICING = {
+    '''
     "gpt-4o-mini": {
         "input": 0.150 / 1_000_000,  # $0.150 per 1M input tokens
         "output": 0.600 / 1_000_000, # $0.600 per 1M output tokens
@@ -80,6 +81,7 @@ PRICING = {
         "input": 0 ,  # Free
         "output": 0 , # Free
     },
+    '''
     "Groq Llama3.1 70b": {
         "input": 0 ,  # Free
         "output": 0 , # Free
